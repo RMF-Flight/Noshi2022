@@ -1,0 +1,221 @@
+#include <Wire.h>
+#include <SPI.h>
+
+//motor gps 
+
+#include "SparkFun_TB6612.h"
+
+#include <Arduino_LSM9DS1.h>
+#include <Math.h>
+//bluetooth
+#include <BluetoothSerial.h>
+
+#include <TinyGPS++.h>
+#include "SoftwareSerial.h"
+
+
+
+//モータドライバ
+#define AIN1 13//
+#define BIN1 32//
+#define AIN2 12//
+#define BIN2 33//
+#define PWMA 26//
+#define PWMB 25//
+#define STBY 23//
+
+
+
+const double goal_x = 139.54423149879;             //ゴールの経度(初期値は適当,35.657941,139.542798
+const double goal_y = 35.65724408289; 
+const double R = 6371000.0;  
+
+
+
+
+//モータドライバのよくわからん変数(speedにかける)
+const int offsetA = 1;
+const int offsetB = 1;
+
+//GPS
+static const int RXPin = 5, TXPin = 18;//5,18成功。RXTXピンである必要はない。
+static const uint32_t GPSBaud = 9600;double delta_x, delta_y, now_x, now_y, sita, goal_y_rad,temp1,temp2;   
+
+//9軸の変数
+float acx,acy,acz;
+float magx,magy,magz;
+float gyrox,gyroy,gyroz;
+double angle;
+double gyodegree;
+double magxhose=2.1166;
+double magyhose=2.6555;
+
+
+
+//モータドライバ
+Motor motor1 = Motor(AIN1, AIN2, PWMA, offsetA, STBY);
+Motor motor2 = Motor(BIN1, BIN2, PWMB, offsetB, STBY);
+
+//GPS
+TinyGPSPlus gps;
+SoftwareSerial ss(RXPin, TXPin);
+//bluetooth
+BluetoothSerial SerialBT;
+
+
+
+//////////////割り込み処理
+hw_timer_t *timer1=NULL;//タイマー管理用の構造体
+//votaile SemaphoreHandle_t timerSemaphore;//タイマー割り込みが発生したかどうかを表すセマフォ
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;//排他制御を行うための変数
+
+volatile uint32_t timerCounter1 =0;//タイマー割込みが発生した回数を保存する変数。
+
+void IRAM_ATTR onTimer1(){//割り込みが発生したときに呼び出される関数
+  portENTER_CRITICAL_ISR(&timerMux);//排他制御開始
+  timerCounter1++;//タイムカウンタを1
+  portEXIT_CRITICAL_ISR(&timerMux);//排他制御終了
+
+}
+
+
+
+
+
+
+void setup(){
+  //bluetooth
+
+  
+  
+
+  //Serial.begin(115200);//Serialはtxとrxでtweliteと通信するもの、mySerialは受信機と送信機の間。
+  Serial1.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);//bluetooth でつなぐ場合
+
+   ss.begin(GPSBaud);//softwareserial専用のbaud
+
+  timer1=timerBegin(0,80,true);//タイマの初期設定、タイマー番号0、分周比80
+  timerAttachInterrupt(timer1, &onTimer1, true);//タイマに割り込みハンドラを設定
+  timerAlarmWrite(timer1, 1000000, true);//タイマに割り込みのタイミングを設定クロック周波数80MHz
+  timerAlarmEnable(timer1);//タイマー開始
+  SerialBT.println("Start!");
+    
+  //esp32 Wrover-VEではrxtxは一つしかないのでソフトウェアシリアルでgpsを動かす。
+  //while(!SerialBT){
+    //;
+  //}
+
+  if (!IMU.begin()) {
+    //Serial.println("Failed to initialize IMU!");
+    while (1);
+  }
+
+
+}
+
+void loop(){
+
+  
+
+  if(timerCounter1>0){
+    portENTER_CRITICAL(&timerMux);
+    timerCounter1++;
+    portEXIT_CRITICAL(&timerMux);
+    GPSvalue();
+    //Serial.printf("Yes");
+    
+    
+  }
+  
+   if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(acx, acy, acz);
+
+    angle=asin(acy);//arcsinはradで渡される。
+    gyodegree=angle*(180/M_PI);//定常状態での仰角を表示する。
+     
+  }
+  if (IMU.magneticFieldAvailable()) {
+    IMU.readMagneticField(magx, magy, magz);
+    magx=magx+magxhose;
+    magy=magy+magyhose;
+    SerialBT.printf(" %f,%f,%f\n", magx, magy, magz);
+   }
+
+
+
+
+   forward(motor1, motor2, 255);//前に進む
+   //motor1.drive(255,1000);
+   //motor1.drive(-255,1000);
+   //motor1.brake();
+   delay(10000);//10秒まつ
+  
+}
+
+
+
+void GPSvalue()
+{
+  // This sketch displays information every time a new sentence is correctly encoded.
+  while (ss.available() > 0)//GPSが動作可能だったら続ける
+    if (gps.encode(ss.read()))//GPSのデータをエンコードする
+      displayInfo();//情報を出力する。
+
+  if (millis() > 5000 && gps.charsProcessed() < 10)//通信不可能
+  {
+    SerialBT.println(F("No GPS detected: check wiring."));
+    while(true);
+  }
+}
+
+
+void displayInfo(){
+  
+  SerialBT.print(F("Location: ")); 
+  if (gps.location.isValid())
+  {
+    SerialBT.print(gps.location.lat(), 6);
+    SerialBT.print(F(","));
+    SerialBT.print(gps.location.lng(), 6);
+  }
+  else
+  {
+    SerialBT.print(F("INVALID"));
+  }
+
+  SerialBT.print(F("  Date/Time: "));
+  if (gps.date.isValid())
+  {
+    SerialBT.print(gps.date.month());
+    SerialBT.print(F("/"));
+    SerialBT.print(gps.date.day());
+    SerialBT.print(F("/"));
+    SerialBT.print(gps.date.year());
+  }
+  else
+  {
+    SerialBT.print(F("INVALID"));
+  }
+
+  SerialBT.print(F(" "));
+  if (gps.time.isValid())
+  {
+    if (gps.time.hour() < 10) SerialBT.print(F("0"));
+    SerialBT.print(gps.time.hour());
+    SerialBT.print(F(":"));
+    if (gps.time.minute() < 10) SerialBT.print(F("0"));
+    SerialBT.print(gps.time.minute());
+    SerialBT.print(F(":"));
+    if (gps.time.second() < 10) SerialBT.print(F("0"));
+    SerialBT.print(gps.time.second());
+    SerialBT.print(F("."));
+    if (gps.time.centisecond() < 10) SerialBT.print(F("0"));
+    SerialBT.print(gps.time.centisecond());
+  }
+  else
+  {
+    SerialBT.print(F("INVALID"));
+  }
+
+  SerialBT.println();
+}
