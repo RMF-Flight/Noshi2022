@@ -17,6 +17,8 @@
 #include <Arduino_LSM9DS1.h>
 #include <Math.h>
 
+//sda 21  scl 22
+
 
 
 float acx,acy,acz;
@@ -24,18 +26,19 @@ float magx,magy,magz;
 float gyrox,gyroy,gyroz;
 double angle;
 double gyodegree;
-double magxhose=2.1166;
-double magyhose=2.6555;
+float magxhose=2.1166;
+float magyhose=2.6555;
+float phi;
 
 
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
-  //Serial.println("Started");
+  Serial.println("Started");
 
   if (!IMU.begin()) {
-    //Serial.println("Failed to initialize IMU!");
+    Serial.println("Failed to initialize IMU!");
     while (1);
   }
 
@@ -89,12 +92,25 @@ void loop() {
     IMU.readMagneticField(magx, magy, magz);
     magx=magx+magxhose;
     magy=magy+magyhose;
-    Serial.printf(" %f,%f,%f\n", magx, magy, magz);
+    Serial.print("magx:");
+    Serial.print(magx);
+    Serial.print('\t');
+    Serial.print("magy:");
+    Serial.print(magy);
+    Serial.print('\t');
+    Serial.print("magz:");
+    Serial.println(magz);
+   
    }
 
 
-  delay(100);
+   phi=atan2(magx,magy);//地磁気から角度を出したい！！
+   phi=phi*(180/M_PI);
+   Serial.print("phi=");
+   Serial.print(phi);
 
+
+   delay(10);
   
 
 
