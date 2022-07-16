@@ -14,6 +14,11 @@
   This example code is in the public domain.
 */
 
+/*
+ *補正についての参考https://qiita.com/Suzumushi724/items/0b25efeaaa2c416f0f83
+
+*/
+
 #include <Arduino_LSM9DS1.h>
 #include <Math.h>
 
@@ -28,8 +33,59 @@ double angle;
 double gyodegree;
 float magxhose=2.1166;
 float magyhose=2.6555;
-float phi;
+float theta;
+float LSM_mag[2];
+float fix_value[2];
 
+/////////////////////////////
+void fix(){//地磁気の補正を行う関数これを行う前にモーターを動かしておく必要がある。一回転させたい。
+  float max_buffer[2];
+  float min_buffer[2];
+  Serial.println("Start!");
+  for(int i=0;i<30;i++){
+    for(int v=0;v<2;v++){
+      IMU.readMagneticField(magx, magy, magz);
+      LSM_mag[0]=magx;
+      LSM_mag[1]=magy;
+     
+      float tmp=LSM_mag[v];
+
+      if(i==0){
+        max_buffer[v]=tmp;
+        min_buffer[v]=tmp; 
+      }
+      else{
+        if(tmp>max_buffer[v]){
+          max_buffer[v]=tmp;
+        }
+        if(tmp<min_buffer[v]){
+          min_buffer[v]=tmp;
+        }
+      }
+    }
+    delay(300);//0.3*30=9秒回転
+  }
+  for(int i=0;i<2;i++){
+    fix_value[i]=(max_buffer[i]+min_buffer[i])/2;
+  }
+}
+
+float compass(float x_mag,float y_mag){//地磁気をコンパスとするやつ
+  float theta2 = atan2(y_mag,x_mag)*180/3.1415;
+  //if(x_mag>0){
+    //if(y_mag<0){
+      //theta=theta+360;
+    //}
+  //}
+
+  if(theta2<0){
+    theta2=theta2+360;
+  }
+  return theta2;
+}
+
+
+///////////////////////////////////////////////
 
 
 void setup() {
@@ -88,30 +144,22 @@ void loop() {
     //Serial.println(gyroz);
   }
 
-   if (IMU.magneticFieldAvailable()) {
-    IMU.readMagneticField(magx, magy, magz);
-    magx=magx+magxhose;
-    magy=magy+magyhose;
-    Serial.print("magx:");
-    Serial.print(magx);
-    Serial.print('\t');
-    Serial.print("magy:");
-    Serial.print(magy);
-    Serial.print('\t');
-    Serial.print("magz:");
-    Serial.println(magz);
-   
-   }
 
+  fix();
+  while(1){
+    if (IMU.magneticFieldAvailable()) {
+      IMU.readMagneticField(magx, magy, magz);
+      magx=magx-fix_value[0];
+      magy=magy-fix_value[1];
+      theta=compass(magx,magy);
+    
+      Serial.print("theta:");
+      Serial.print(theta);
+      Serial.print('\n');
+    }
+    delay(10);
+  }
 
-   phi=atan2(magx,magy);//地磁気から角度を出したい！！
-   phi=phi*(180/M_PI);
-   Serial.print("phi=");
-   Serial.print(phi);
-
-
-   delay(10);
-  
 
 
   
