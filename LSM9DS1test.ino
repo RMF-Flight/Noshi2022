@@ -34,6 +34,7 @@ double gyodegree;
 float magxhose=2.1166;
 float magyhose=2.6555;
 float theta;
+
 float LSM_mag[2];
 float fix_value[2];
 
