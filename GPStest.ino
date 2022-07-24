@@ -1,3 +1,5 @@
+//Vincenty法を反映したものwikipediaの式
+
 #include <TinyGPSPlus.h>
 #include <SoftwareSerial.h>
 #include "Math.h"
@@ -6,18 +8,18 @@
    It requires the use of SoftwareSerial, and assumes that you have a
    4800-baud serial GPS device hooked up on pins 4(rx) and 3(tx).
 */
-static const int RXPin = 5, TXPin = 18;//5,18成功。RXTXピンである必要はない。
+static const int RXPin = 34, TXPin = 0;//5,18成功。RXTXピンである必要はない。
 static const uint32_t GPSBaud = 9600;
-
-
-
-const double goal_x = 139.54423149879;             //ゴールの経度(初期値は適当,35.657941,139.542798
-
-const double goal_y = 35.65724408289; 
+double delta_x, delta_y, now_x, now_y, sita, goal_y_rad,temp1,temp2;
+double r; 
+double GPSsita; 
 const double R = 6371000.0;  
-double r;  
+const double goal_x = 139.54423149879;             //ゴールの経度(初期値は適当,35.657941,139.542798
+const double goal_y = 35.65724408289; 
 
-double now_x, now_y;
+
+
+
 
 // The TinyGPSPlus object
 TinyGPSPlus gps;
@@ -58,7 +60,8 @@ void setup()
 
   Serial.println(F("DeviceExample.ino"));
   Serial.println(F("A simple demonstration of TinyGPSPlus with an attached GPS module"));
-  Serial.print(F("Testing TinyGPSPlus library v. ")); Serial.println(TinyGPSPlus::libraryVersion());
+  Serial.print(F("Testing TinyGPSPlus library v. ")); 
+  Serial.println(TinyGPSPlus::libraryVersion());
   Serial.println(F("by Mikal Hart"));
   Serial.println();
 }
@@ -66,23 +69,50 @@ void setup()
 void loop()
 {
 
-  if(timerCounter1>0){
+   if(timerCounter1>=0){
     portENTER_CRITICAL(&timerMux);
     timerCounter1++;
     portEXIT_CRITICAL(&timerMux);
-    GPSvalue();
-    //Serial.printf("Yes");   
-  }
+    GPSvalue(); 
+    
+   }
 
-  r = R * acos(sin(goal_y*3.14/180) * sin(now_y*3.14/180)+cos(now_y*3.14/180) * cos(goal_y*3.14/180)*cos((goal_x - now_x)*3.14/180));
+   now_x=gps.location.lng();
+   now_y=gps.location.lat();
 
-  Serial.println(r);
-  //Serial.println(now_x);
-  //Serial.println(now_y);
+   delta_x = goal_x - now_x;           //ゴールまでのx,y座標の差分を読み込む
+   delta_y = goal_y - now_y;
 
+   r = R * acos(sin(goal_y*3.14/180) * sin(now_y*3.14/180)+cos(now_y*3.14/180) * cos(goal_y*3.14/180)*cos((goal_x - now_x)*3.14/180));     
+   //距離
+   r=abs(r);
+   //Serial.println(r);
+
+   //方角
+   delta_x = delta_x * 3.14/180;
+   now_x = now_x * 3.14/180;
+   goal_y_rad = goal_y * 3.14/180;
+   now_y = now_y * 3.14/180;
+
+   temp1 = cos(now_y)*tan(goal_y_rad);
+   temp2 = sin(now_y)*cos(delta_x);
+
+   GPSsita = atan2(sin(delta_x),(temp1-temp2));
+   GPSsita = GPSsita * 180/3.14;  
+
+   Serial.println(GPSsita);
+   
+
+  
+  
+
+
+  
   
 
   
+
+ 
 }
 
 void GPSvalue()
@@ -92,8 +122,6 @@ void GPSvalue()
     if (gps.encode(ss.read()))//GPSのデータをエンコードする
       displayInfo();//情報を出力する。
 
-      
-
   if (millis() > 5000 && gps.charsProcessed() < 10)//通信不可能
   {
     Serial.println(F("No GPS detected: check wiring."));
@@ -102,12 +130,12 @@ void GPSvalue()
 }
 
 void displayInfo(){
-  
   Serial.print(F("Location: ")); 
   if (gps.location.isValid())
   {
-    now_x=gps.location.lng();
-    now_y=gps.location.lat();
+    Serial.print(gps.location.lng(),6);
+    Serial.print(F(","));
+    Serial.print(gps.location.lat(),6);
     
   }
   else
