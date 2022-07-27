@@ -1,54 +1,77 @@
 #include <Wire.h>
 #include <SPI.h>
-
 //motor gps 
 
+#include <ESP32Servo.h>
+ 
 #include "SparkFun_TB6612.h"
 
 #include <Arduino_LSM9DS1.h>
 #include <Math.h>
 //bluetooth
-#include <BluetoothSerial.h>
+//#include <BluetoothSerial.h>
 
 #include <TinyGPS++.h>
 #include "SoftwareSerial.h"
-
+#include <Ticker.h>
+#include "UnitV.h"
 
 
 //モータドライバ
-#define AIN1 13//
+#define AIN1 12//
 #define BIN1 32//
-#define AIN2 12//
+#define AIN2 14//
 #define BIN2 33//
 #define PWMA 26//
 #define PWMB 25//
-#define STBY 23//
+#define STBY 13//こいつ3V3でよくね？
+
+//HCSR
+#define TrigPin 15 // D1
+#define EchoPin 2 // D2
+const float time_30=0.5;//30ド回る
+const float time_90=1.5;//90ド回る
+
+
+static const int RXPin = 34, TXPin = 0;//5,18成功。RXTXピンである必要はない。
+ 
+const int SERVO = 27;
+Servo servo;  
 
 
 
 const double goal_x = 139.54423149879;             //ゴールの経度(初期値は適当,35.657941,139.542798
-const double goal_y = 35.65724408289; 
+const double goal_y = 35.65724408289; //学校のどこか
 const double R = 6371000.0;  
-
-
-
-
 //モータドライバのよくわからん変数(speedにかける)
 const int offsetA = 1;
 const int offsetB = 1;
 
-//GPS
-static const int RXPin = 5, TXPin = 18;//5,18成功。RXTXピンである必要はない。
-static const uint32_t GPSBaud = 9600;double delta_x, delta_y, now_x, now_y, sita, goal_y_rad,temp1,temp2;   
-
-//9軸の変数
+static const uint32_t GPSBaud = 9600;
+double delta_x, delta_y, now_x, now_y, sita, goal_y_rad,temp1,temp2; 
+double speedSound = 331.5 + 0.61 * 20; // 20は現在の気温
+double Ultradistance = 0;
 float acx,acy,acz;
 float magx,magy,magz;
 float gyrox,gyroy,gyroz;
-double angle;
-double gyodegree;
-double magxhose=2.1166;
-double magyhose=2.6555;
+float Magtheta;
+double GPSsita;//北からの角度が出せる
+float GPSsitaf;
+float rotate;
+float gyoukaku;
+double r;//GPS用
+double HCSRt;
+//カメラ用
+int16_t data[4];
+int area = 0;
+double per = 0.0;
+int max_area = 240 * 320;
+double Cameratheta = 0.0;
+double x,y;
+float xf,yf;
+bool Cameraflag = false;
+double Cameradist = 0;
+int count30=0;
 
 
 
@@ -56,105 +79,283 @@ double magyhose=2.6555;
 Motor motor1 = Motor(AIN1, AIN2, PWMA, offsetA, STBY);
 Motor motor2 = Motor(BIN1, BIN2, PWMB, offsetB, STBY);
 
-//GPS
+//GPS　Serialピンはtweliteで用いる
+Ticker ticker1;
 TinyGPSPlus gps;
-SoftwareSerial ss(RXPin, TXPin);
-//bluetooth
-BluetoothSerial SerialBT;
+SoftwareSerial ss(RXPin, TXPin);//受信するピン、送信するピン
 
 
 
-//////////////割り込み処理
-hw_timer_t *timer1=NULL;//タイマー管理用の構造体
-//votaile SemaphoreHandle_t timerSemaphore;//タイマー割り込みが発生したかどうかを表すセマフォ
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;//排他制御を行うための変数
-
-volatile uint32_t timerCounter1 =0;//タイマー割込みが発生した回数を保存する変数。
-
-void IRAM_ATTR onTimer1(){//割り込みが発生したときに呼び出される関数
-  portENTER_CRITICAL_ISR(&timerMux);//排他制御開始
-  timerCounter1++;//タイムカウンタを1
-  portEXIT_CRITICAL_ISR(&timerMux);//排他制御終了
-
-}
-
+#include "FlightPin.h"
+#include "LandingDetach.h"
+#include "Magcari.h"
 
 
 
 
 
 void setup(){
-  //bluetooth
-
   
   
+  Serial.println("Start!");
+  
 
-  //Serial.begin(115200);//Serialはtxとrxでtweliteと通信するもの、mySerialは受信機と送信機の間。
-  Serial1.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);//bluetooth でつなぐ場合
+  Serial.begin(115200);//Serialはtxとrxでtweliteと通信するもの、mySerialは受信機と送信機の間。
 
-   ss.begin(GPSBaud);//softwareserial専用のbaud
+  ss.begin(GPSBaud);//softwareserial専用のbaud
+  ticker1.attach_ms(1000, GPSvalue);
+  
 
-  timer1=timerBegin(0,80,true);//タイマの初期設定、タイマー番号0、分周比80
-  timerAttachInterrupt(timer1, &onTimer1, true);//タイマに割り込みハンドラを設定
-  timerAlarmWrite(timer1, 1000000, true);//タイマに割り込みのタイミングを設定クロック周波数80MHz
-  timerAlarmEnable(timer1);//タイマー開始
-  SerialBT.println("Start!");
+
+
+  servo.attach(SERVO);//サーボピン設定
     
-  //esp32 Wrover-VEではrxtxは一つしかないのでソフトウェアシリアルでgpsを動かす。
-  //while(!SerialBT){
-    //;
-  //}
+  
 
-  if (!IMU.begin()) {
-    //Serial.println("Failed to initialize IMU!");
-    while (1);
+  if (!IMU.begin()) {//9軸を動かすためのなにか
+    Serial.println("Failed to initialize IMU!");
+    
   }
+  IMU.readGyroscope(gyrox, gyroy, gyroz);
+  IMU.readAcceleration(acx, acy, acz);
+  IMU.readMagneticField(magx, magy, magz);
+  //Serial.printf(" %f,%f,%f\n", magx, magy, magz);
+
+  
+  pinMode(TrigPin, OUTPUT);//HCSRの設定
+  pinMode(EchoPin, INPUT);
 
 
 }
 
 void loop(){
+  
+ 
+
+  ////////////////////////////////////////////////////////////////////////本制御
+  flight_loop();//パラシュート放出確認
+  Serial.println("mission3completed(parachuted)");
+  landing_detect();//着地検知
+  Serial.println("mission4completed(landed)");
+
+  
+  
+  Serial.println("detaching the parachute...");
+  int angle = 0;//サーボ
+  servo.write(angle);
+  delay(2000);
+  angle=180;
+  servo.write(angle);
+  delay(2000);
+  Serial.println("mission5completed(parachute detached)");
+  
+  Serial.println("10seconds forward");
+  forward(motor1, motor2, 255);//前に進む
+  delay(10000);//10秒進んでパラシュートとかよけてもらう
+
+  Serial.println("Calibration Start!");
+  left(motor1, motor2, 255);
+  fix();//地磁気を補正値を取得する。9秒間で1回転以上回るように。delayもこの中に入っている。
+  Serial.println("Calibration finished");
 
   
 
-  if(timerCounter1>0){
-    portENTER_CRITICAL(&timerMux);
-    timerCounter1++;
-    portEXIT_CRITICAL(&timerMux);
-    GPSvalue();
-    //Serial.printf("Yes");
-    
-    
-  }
-  
-   if (IMU.accelerationAvailable()) {
-    IMU.readAcceleration(acx, acy, acz);
 
-    angle=asin(acy);//arcsinはradで渡される。
-    gyodegree=angle*(180/M_PI);//定常状態での仰角を表示する。
-     
-  }
-  if (IMU.magneticFieldAvailable()) {
-    IMU.readMagneticField(magx, magy, magz);
-    magx=magx+magxhose;
-    magy=magy+magyhose;
-    SerialBT.printf(" %f,%f,%f\n", magx, magy, magz);
+  
+
+
+  //GPS処理
+   now_x=gps.location.lng();
+   now_y=gps.location.lat();
+
+   r = R * acos(sin(goal_y*3.14/180) * sin(now_y*3.14/180)+cos(now_y*3.14/180) * cos(goal_y*3.14/180)*cos((goal_x - now_x)*3.14/180));     
+   r=abs(r);
+   //Serial.print("toGoaldistance");
+   //Serial.println(r);
+
+   GPSsitaf=GPScompass();//GPSのコンパス(float)
+   
+
+   //Serial.print("toGoaltheta");
+   //Serial.println(GPSsita);
+
+
+   //地磁気計算
+   IMU.readMagneticField(magx, magy, magz);
+   magx=magx-fix_value[0];
+   magy=magy-fix_value[1];
+   Magtheta=compass(magx,magy);//地磁気コンパス
+
+/////////////////////////////////////////////////mission5
+   while(r>10){//もしゴールとの距離が10m以上なら
+    rotate=GPSsitaf-Magtheta;//地磁気とGPSの角度差
+    
+    Serial.println("matching GPS and magnetic..");
+    while(Magtheta>GPSsitaf+5 || Magtheta<GPSsitaf-5){//GPSと地磁気の角度を合わせる
+      if( rotate>0){//もし正なら右側回転
+        right(motor1, motor2, 255);
+        delay(500);       
+      }else{//もし負なら左側回転
+        left(motor1, motor2, 255);
+        delay(500);       
+      }
+      IMU.readMagneticField(magx, magy, magz);
+      magx=magx-fix_value[0];
+      magy=magy-fix_value[1];
+      Magtheta=compass(magx,magy);            
+    }
+    Serial.println("thisway!");
+    
+    Serial.println("10seconds forward");
+    forward(motor1, motor2, 255);//10秒直進
+    delay(10000);
+
+    now_x=gps.location.lng();
+    now_y=gps.location.lat();
+    r = R * acos(sin(goal_y*3.14/180) * sin(now_y*3.14/180)+cos(now_y*3.14/180) * cos(goal_y*3.14/180)*cos((goal_x - now_x)*3.14/180));     
+    r=abs(r);
+    Serial.print("toGoaldistance");
+    Serial.println(r); 
+
+    GPSsitaf=GPScompass();//GPSのコンパス
+
+    Serial.print("toGoaltheta");
+    Serial.println(GPSsita);
+    
    }
+   Serial.print("mission6completed(near the corn)");
+////////////////////////////
+
+
+
+   
+   while(1){
+    //仰角を出す。
+    IMU.readAcceleration(acx, acy, acz);
+    gyoukaku=asin(acy);//arcsinはradで渡される。
+    gyoukaku=gyoukaku*(180/M_PI);
+    Serial.println(gyoukaku);
+
+    Camera();
+    while(Cameradist>30.0){
+      left(motor1, motor2, 255);
+      delay(500); 
+      //仰角を出す。
+      IMU.readAcceleration(acx, acy, acz);
+      gyoukaku=asin(acy);//arcsinはradで渡される。
+      gyoukaku=gyoukaku*(180/M_PI);
+      Serial.println(gyoukaku);
+      Camera();
+    }
+
+    count30=abs((int)Cameratheta/30);//30度の倍数
+
+     if(Cameratheta<0){
+       left(motor1, motor2, 255);
+       delay(time_30*(float)count30 * 1000);    
+     }else{
+       right(motor1, motor2, 255);
+       delay(time_30*(float)count30 * 1000);     
+     }
+
+     trigger();
+     HCSRt = pulseIn(EchoPin, HIGH); // μS
+     if(HCSRt>0){
+       HCSRt = HCSRt / 2; //往復距離なので半分の時間
+       Ultradistance = HCSRt * speedSound * 100 / 1000000; // 距離（cm）を計算
+       if(Ultradistance<10){
+         Serial.println("All missions are completed");
+         exit(0);
+       }else{
+         forward(motor1, motor2, 255);//2秒直進
+         delay(2000);  
+       }  
+     }else{
+       forward(motor1, motor2, 255);//2秒直進
+       delay(2000);    
+     }
+      
+
+   }
+   
+
+
+
+
+
+
+   
+   
+   //if(r>10){
+
+    
+    
+   //}
+
+
+
+   
+
+  
+
+  
+
+
+  
+  
+
+
+  
+  //HCSR
+  
+
+
+  //9軸
+  
+   
+
+
+//////////////////
+
+
+//HCSRからの値
+   
+   //Serial.print("hcsr=");
+   //Serial.println(distance);
+//////////////
+
+
+//GPS関連の操作
+   //ゴールとの距離
+   
+////////////////
+
+
+
+   
 
 
 
 
    forward(motor1, motor2, 255);//前に進む
    //motor1.drive(255,1000);
-   //motor1.drive(-255,1000);
+   //motor2.drive(200,1000);
    //motor1.brake();
-   delay(10000);//10秒まつ
-  
+
+   //if(distance<10){
+    //motor1.brake();
+    //motor2.brake();       
+   //}
+
+
+
 }
 
 
 
-void GPSvalue()
+////////////////////////////////////////////////////////////////////////////////////////
+
+void GPSvalue()//GPSが値を返すだけのやつ。できればdisplayInfoと合体させたい。
 {
   // This sketch displays information every time a new sentence is correctly encoded.
   while (ss.available() > 0)//GPSが動作可能だったら続ける
@@ -163,59 +364,109 @@ void GPSvalue()
 
   if (millis() > 5000 && gps.charsProcessed() < 10)//通信不可能
   {
-    SerialBT.println(F("No GPS detected: check wiring."));
-    while(true);
+    Serial.println(F("No GPS detected: check wiring."));
+    //while(true);
   }
+
+  
 }
 
 
-void displayInfo(){
+void displayInfo(){//GPSが値を返すだけのやつ今回は緯度と経度だけを渡している。
   
-  SerialBT.print(F("Location: ")); 
+  Serial.print(F("Location: ")); 
   if (gps.location.isValid())
   {
-    SerialBT.print(gps.location.lat(), 6);
-    SerialBT.print(F(","));
-    SerialBT.print(gps.location.lng(), 6);
+    Serial.print(gps.location.lng(),6);
+    Serial.print(F(","));
+    Serial.print(gps.location.lat(),6);
+    
   }
+  
   else
   {
-    SerialBT.print(F("INVALID"));
+    Serial.print(F("INVALID"));
   }
 
-  SerialBT.print(F("  Date/Time: "));
-  if (gps.date.isValid())
-  {
-    SerialBT.print(gps.date.month());
-    SerialBT.print(F("/"));
-    SerialBT.print(gps.date.day());
-    SerialBT.print(F("/"));
-    SerialBT.print(gps.date.year());
-  }
-  else
-  {
-    SerialBT.print(F("INVALID"));
+  
+  Serial.println();
+}
+
+void trigger() {//HCSR04
+  digitalWrite(TrigPin, LOW); 
+  delayMicroseconds(2);
+  digitalWrite(TrigPin, HIGH );
+  delayMicroseconds( 10 );
+  digitalWrite(TrigPin, LOW );
+}
+
+float GPScompass(){
+   delta_x = goal_x - now_x;           //ゴールまでのx,y座標の差分を読み込む
+   delta_y = goal_y - now_y;
+
+   //方角を出力する。
+   delta_x = delta_x * 3.14/180;
+   now_x = now_x * 3.14/180;
+   goal_y_rad = goal_y * 3.14/180;
+   now_y = now_y * 3.14/180;
+
+   temp1 = cos(now_y)*tan(goal_y_rad);
+   temp2 = sin(now_y)*cos(delta_x);
+
+   GPSsita = atan2(sin(delta_x),(temp1-temp2));
+   GPSsita = GPSsita * 180/3.14;  
+
+   if(GPSsita<0){
+    GPSsita = GPSsita + 360; //0~360 
+   }
+   GPSsitaf=(float)GPSsita;
+   return GPSsitaf;
+
+}
+
+void Camera() {
+  //Wire.begin();
+  if( Cameraflag == false){
+    Cameraflag = true;
+    SendID(1);
+    //delay(500);
+    Serial.println("I2C:Start");
+    
   }
 
-  SerialBT.print(F(" "));
-  if (gps.time.isValid())
-  {
-    if (gps.time.hour() < 10) SerialBT.print(F("0"));
-    SerialBT.print(gps.time.hour());
-    SerialBT.print(F(":"));
-    if (gps.time.minute() < 10) SerialBT.print(F("0"));
-    SerialBT.print(gps.time.minute());
-    SerialBT.print(F(":"));
-    if (gps.time.second() < 10) SerialBT.print(F("0"));
-    SerialBT.print(gps.time.second());
-    SerialBT.print(F("."));
-    if (gps.time.centisecond() < 10) SerialBT.print(F("0"));
-    SerialBT.print(gps.time.centisecond());
+  if(Cameraflag == true){
+  getData(data);//240*320 QVGA
+  delay(100);
+  /*
+  for(int i=0;i<4;i++){
+    Serial.print(data[i]);
+    Serial.print(",");
   }
-  else
-  {
-    SerialBT.print(F("INVALID"));
-  }
+  */
+  area = abs(data[2]*data[3]);
+  if(data[2] == -1 || data[3] == -1) area = 0;
+  //Serial.print("area:");
+  //Serial.println(area);
+  Serial.print("面積:");
+  Serial.println(area);
+  Serial.print("距離:");
+  Cameradist = (double)gyoukaku * pow((double)area/31260,-1.0/1.966);
+  if(Cameradist <= 1.0) Cameradist = -1;
+  Serial.println(Cameradist);
+  
 
-  SerialBT.println();
+  //per = (double)area / max_area; 
+  //Serial.print("per:");
+  //Serial.println(per);//int16_tからdoubleに変換するときor視野角を考慮した変換によって倍率が変化しているため1を超える
+
+  //x:0~70,y:0~55
+  
+  x = (double)data[0];
+  y = (double)data[1];
+ 
+  Cameratheta = getAngleFromCenter(x,y);
+  Serial.print("画像中心下部からの角度:");
+  Serial.print(Cameratheta);
+  Serial.println("度");
+  }
 }
