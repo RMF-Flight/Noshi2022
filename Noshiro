@@ -233,18 +233,18 @@ void loop(){
     //仰角を出す。
     IMU.readAcceleration(acx, acy, acz);
     gyoukaku=asin(acy);//arcsinはradで渡される。
-    gyoukaku=gyoukaku*(180/M_PI);
-    Serial.println(gyoukaku);
+    //gyoukaku=gyoukaku*(180/M_PI);
+    //Serial.println(gyoukaku);
 
     Camera();
-    while(Cameradist>30.0){
+    while(Cameradist>30.0){//infを避ける
       left(motor1, motor2, 255);
       delay(500); 
       //仰角を出す。
       IMU.readAcceleration(acx, acy, acz);
       gyoukaku=asin(acy);//arcsinはradで渡される。
-      gyoukaku=gyoukaku*(180/M_PI);
-      Serial.println(gyoukaku);
+      //gyoukaku=gyoukaku*(180/M_PI);
+      //Serial.println(gyoukaku);
       Camera();
     }
 
@@ -450,7 +450,7 @@ void Camera() {
   Serial.print("面積:");
   Serial.println(area);
   Serial.print("距離:");
-  Cameradist = (double)gyoukaku * pow((double)area/31260,-1.0/1.966);
+  Cameradist = cos((double)gyoukaku) * pow((double)area/31260,-1.0/1.966);
   if(Cameradist <= 1.0) Cameradist = -1;
   Serial.println(Cameradist);
   
