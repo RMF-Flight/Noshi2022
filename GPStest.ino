@@ -1,4 +1,3 @@
-//Vincenty法を反映したものwikipediaの式
 
 #include <TinyGPSPlus.h>
 #include <SoftwareSerial.h>
@@ -14,8 +13,12 @@ double delta_x, delta_y, now_x, now_y, sita, goal_y_rad,temp1,temp2;
 double r; 
 double GPSsita; 
 const double R = 6371000.0;  
-const double goal_x = 139.54423149879;             //ゴールの経度(初期値は適当,35.657941,139.542798
-const double goal_y = 35.65724408289; 
+
+//const double goal_x = 139.460884;             //ゴールの経度(初期値は適当,35.657941,139.542798
+//const double goal_y = 35.717222; 
+
+const double goal_x = 139.54423149879;             //ゴールの経
+const double goal_y = 35.65724408289;
 
 
 
@@ -84,7 +87,7 @@ void loop()
    delta_y = goal_y - now_y;
 
    r = R * acos(sin(goal_y*3.14/180) * sin(now_y*3.14/180)+cos(now_y*3.14/180) * cos(goal_y*3.14/180)*cos((goal_x - now_x)*3.14/180));     
-   //距離
+
    r=abs(r);
    //Serial.println(r);
 
