@@ -1,5 +1,3 @@
-
-
 #include <Arduino.h>
 
 static const int flightPin = 35; 
