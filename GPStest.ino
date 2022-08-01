@@ -106,9 +106,7 @@ void loop()
    Serial.println(GPSsita);
    
 
-  
-  
-
+ 
 
   
   
