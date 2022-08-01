@@ -13,7 +13,7 @@ TB6612 SparkFun Library
 Development environment specifics:
 Developed on Arduino 1.6.4
 Developed with ROB-9457
-******************************************************************************/
+*****************************************************************************/
 
 #include "SparkFun_TB6612.h"
 #include <Arduino.h>
